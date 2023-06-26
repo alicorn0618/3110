@@ -10,5 +10,12 @@ module ListStack = struct
   let push x s = x :: s
 
   exception Empty
-  
+
+  let peek = function
+  | [] -> raise Empty
+  | h :: _ -> h
+
+  let pop = function
+  | [] -> raise Empty
+  | _ :: t -> t
 end
