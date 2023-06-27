@@ -778,3 +778,269 @@ module MutableRecordStack : MutableStack = struct
     | None -> raise Empty
     | Some {next} -> s.top <- next
 end
+
+(** Arrays and Loops *)
+
+let v = [|0.; 1.|]
+
+let () = v.(0) <- 5.
+
+module type Map = sig
+  type ('k, 'v) t
+
+  val insert : 'k -> 'v -> ('k, 'v) t -> ('k, 'v) t
+
+  val find : 'k -> ('k, 'v) t -> 'v option
+
+  val remove : 'k -> ('k, 'v) t -> ('k, 'v) t
+
+  val empty : ('k, 'v) t
+
+  val of_list : ('k * 'v) list -> ('k, 'v) t
+
+  val bindings : ('k, 'v) t -> ('k * 'v) list
+end
+
+module ListMap : Map = struct
+  (** AF: [[(k1, v1); (k2, v2); ...; (kn, vn)]] is the map {k1 : v1, k2 : v2,
+      ..., kn : vn}. If a key appears more than once in the list, then in the
+      map it is bound to the left-most occurrence in the list. For example,
+      [[(k, v1); (k, v2)]] represents {k : v1}. The empty list represents
+      the empty map.
+      RI: none. *)
+  type ('k, 'v) t = ('k * 'v) list
+
+  (** Efficiency: O(1). *)
+  let insert k v m = (k, v) :: m
+
+  (** Efficiency: O(n). *)
+  let find = List.assoc_opt
+
+  (** Efficiency: O(n). *)
+  let remove k lst = List.filter (fun (k', _) -> k <> k') lst
+
+  (** Efficiency: O(1). *)
+  let empty = []
+
+  (** Efficiency: O(1). *)
+  let of_list lst = lst
+
+  (** [keys m] is a list of the keys in [m], without
+      any duplicates.
+      Efficiency: O(n log n). *)
+  let keys m = m |> List.map fst |> List.sort_uniq Stdlib.compare
+
+  (** [binding m k] is [(k, v)], where [v] is the value that [k]
+       binds in [m].
+       Requires: [k] is a key in [m].
+       Efficiency: O(n). *)
+  let binding m k = (k, List.assoc k m)
+
+  (** Efficiency: O(n log n) + O(n) * O(n), which is O(n^2). *)
+  let bindings m = List.map (binding m) (keys m)
+end
+
+module type DirectAddressMap = sig
+  type 'v t
+
+  val insert : int -> 'v -> 'v t -> unit
+
+  val find : int -> 'v t -> 'v option
+
+  val remove : int -> 'v t -> unit
+
+  val create : int -> 'v t
+
+  val of_list : int -> (int * 'v) list -> 'v t
+
+  val bindings : 'v t -> (int * 'v) list
+end
+
+module ArrayMap : DirectAddressMap = struct
+  (** AF: [[|Some v0; Some v1; ... |]] represents {0 : v0, 1 : v1, ...}.
+      If element [i] of the array is instead [None], then [i] is not
+      bound in the map.
+      RI: None. *)
+  type 'v t = 'v option array
+
+  (** Efficiency: O(1) *)
+  let insert k v a = a.(k) <- Some v
+
+  (** Efficiency: O(1) *)
+  let find k a = a.(k)
+
+  (** Efficiency: O(1) *)
+  let remove k a = a.(k) <- None
+
+  (** Efficiency: O(c) *)
+  let create c = Array.make c None
+
+  (** Efficiency: O(c) *)
+  let of_list c lst =
+    (* O(c) *)
+    let a = create c in
+    (* O(c) * O(1) = O(c) *)
+    List.iter (fun (k, v) -> insert k v a) lst;
+    a
+
+  (** Efficiency: O(c) *)
+  let bindings a =
+    let bs = ref [] in
+    (* O(1) *)
+    let add_binding k v =
+      match v with None -> () | Some v -> bs := (k, v) :: !bs
+    in
+    (* O(c) *)
+    Array.iteri add_binding a;
+    !bs
+end
+
+module type TableMap = sig
+  (** [('k, 'v) t] is the type of mutable table-based maps that bind
+      keys of type ['k] to values of type ['v]. *)
+  type ('k, 'v) t
+
+  (** [insert k v m] mutates map [m] to bind [k] to [v]. If [k] was
+      already bound in [m], that binding is replaced by the binding to
+      [v]. *)
+  val insert : 'k -> 'v -> ('k, 'v) t -> unit
+
+  (** [find k m] is [Some v] if [m] binds [k] to [v], and [None] if [m]
+      does not bind [k]. *)
+  val find : 'k -> ('k, 'v) t -> 'v option
+
+  (** [remove k m] mutates [m] to remove any binding of [k]. If [k] was
+      not bound in [m], the map is unchanged. *)
+  val remove : 'k -> ('k, 'v) t -> unit
+
+  (** [create hash c] creates a new table map with capacity [c] that
+      will use [hash] as the function to convert keys to integers.
+      Requires: The output of [hash] is always non-negative, and [hash]
+      runs in constant time. *)
+  val create : ('k -> int) -> int -> ('k, 'v) t
+
+  (** [bindings m] is an association list containing the same bindings
+      as [m]. *)
+  val bindings : ('k, 'v) t -> ('k * 'v) list
+
+  (** [of_list hash lst] creates a map with the same bindings as [lst],
+      using [hash] as the hash function. Requires: [lst] does not
+      contain any duplicate keys. *)
+  val of_list : ('k -> int) -> ('k * 'v) list -> ('k, 'v) t
+end
+
+
+let  t = Hashtbl.create 16
+let _ = for i = 1 to 16 do
+  Hashtbl.add t i (string_of_int i)
+done
+
+let _ = Hashtbl.stats t
+
+
+(** RB tree *)
+
+type color = Red | Black
+
+type 'a rbtree = Leaf | Node of color * 'a * 'a rbtree * 'a rbtree
+
+let rec mem x = function
+  | Leaf -> false
+  | Node (_, y, l, r) -> 
+    if x < y then mem x l
+    else if x > y then mem x  r
+    else true
+
+let balance = function
+  | Black, z, Node (Red, y, Node (Red, x, a, b), c), d
+  | Black, z, Node (Red, x, a, Node (Red, y, b, c)), d
+  | Black, x, a, Node (Red, z, Node (Red, y, b, c), d)
+  | Black, x, a, Node (Red, y, b, Node (Red, z, c, d)) ->
+    Node (Red, y, Node (Black, x, a, b), Node (Black, z, c, d))
+  | a, b, c, d -> Node (a, b, c, d)
+
+let insert x s =
+  let rec ins = function
+    | Leaf -> Node (Red, x, Leaf, Leaf)
+    | Node (color, y, a, b) as s ->
+      if x < y then balance (color, y, ins a, b)
+      else if x > y then balance (color, y, a, ins b)
+      else s
+  in
+  match ins s with
+  | Node (_, y, a, b) -> Node (Black, y, a, b)
+  | Leaf -> (* guaranteed to be nonempty *)
+    failwith "RBT insert failed with ins returning leaf"
+
+
+let rec ones = 1 :: ones
+
+let rec a = 0 :: b and b = 1 :: a
+
+
+(** A signature for Lwt-style promises, with better names *)
+module type PROMISE = sig
+  type 'a state =
+    | Pending
+    | Resolved of 'a
+    | Rejected of exn
+
+  type 'a promise
+
+  type 'a resolver
+
+  (** [make ()] is a new promise and resolver. The promise is pending. *)
+  val make : unit -> 'a promise * 'a resolver
+
+  (** [return x] is a new promise that is already resolved with value
+      [x]. *)
+  val return : 'a -> 'a promise
+
+  (** [state p] is the state of the promise *)
+  val state : 'a promise -> 'a state
+
+  (** [resolve r x] resolves the promise [p] associated with [r] with
+      value [x], meaning that [state p] will become [Resolved x].
+      Requires: [p] is pending. *)
+  val resolve : 'a resolver -> 'a -> unit
+
+  (** [reject r x] rejects the promise [p] associated with [r] with
+      exception [x], meaning that [state p] will become [Rejected x].
+      Requires: [p] is pending. *)
+  val reject : 'a resolver -> exn -> unit
+end
+module Promise : PROMISE = struct
+  type 'a state =
+    | Pending
+    | Resolved of 'a
+    | Rejected of exn
+
+  type 'a promise = 'a state ref
+
+  type 'a resolver = 'a promise
+
+  (** [write_once p s] changes the state of [p] to be [s]. If [p] and
+      [s] are both pending, that has no effect. Raises: [Invalid_arg] if
+      the state of [p] is not pending. *)
+  let write_once p s =
+    if !p = Pending then p := s else invalid_arg "cannot write twice"
+
+  let make () =
+    let p = ref Pending in
+    (p, p)
+
+  let return x = ref (Resolved x)
+
+  let state p = !p
+
+  let resolve r x = write_once r (Resolved x)
+
+  let reject r x = write_once r (Rejected x)
+end
+
+module type Monad = sig
+  type 'a t 
+  val return : 'a -> 'a t
+  val bind : 'a t -> ('a -> 'b t) -> 'b t
+end
+
