@@ -1040,7 +1040,12 @@ end
 
 module type Monad = sig
   type 'a t 
-  val return : 'a -> 'a t
-  val bind : 'a t -> ('a -> 'b t) -> 'b t
+  val return : 'a -> 'a t (* The return operation metaphorically puts a value into a box*)
+  val bind : 'a t -> ('a -> 'b t) -> 'b t (* *)
 end
 
+module type Monad = sig
+  type 'a t
+  val return : 'a -> 'a t
+  val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
+end
