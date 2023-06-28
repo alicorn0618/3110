@@ -1049,3 +1049,124 @@ module type Monad = sig
   val return : 'a -> 'a t
   val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
 end
+
+let propagate_none
+  (op : int -> int -> int option) (x : int option) (y : int option)
+=
+  match x, y with
+  | None, _ | _, None -> None
+  | Some a, Some b -> op a b
+
+let wrap_output (op : int -> int -> int) (x : int) (y : int) : int option = 
+  Some (op x y)
+
+let ( + ) = propagate_none (wrap_output Int.add)
+let ( - ) = propagate_none (wrap_output Int.sub)
+let ( * ) = propagate_none (wrap_output Int.mul)
+
+let div (x : int) (y : int) : int option =
+  if y = 0 then None else wrap_output Stdlib.( / ) x y
+
+let ( / ) = propagate_none div
+
+(** The work we jsut did *)
+
+let return (x : int) : int option = Some x 
+
+(** The second idea was [factoring out code] to handle all the pattern amtching against [None]. We had to upgrade functions whose inputs were of type int to instead accepts inputs of type [int] [option].
+    Here's that idead experessed as its own functions: *)
+
+let bind (x : int option) (op : int -> int option) : int option = 
+    match x with
+    | None -> None
+    | Some a -> op a
+
+let ( >>= ) = bind
+
+let upgrade op x = x >>= op
+
+let ( + ) (x : int option) (y : int option) : int option =
+  x >>= fun a ->
+  y >>= fun b ->
+  return (Stdlib.( + ) a b)
+
+let ( - ) (x : int option) (y : int option) : int option =
+  x >>= fun a ->
+  y >>= fun b ->
+  return (Int.sub a b)
+
+let ( * ) (x : int option) (y : int option) : int option =
+  x >>= fun a ->
+  y >>= fun b ->
+  return (Stdlib.( * ) a b)
+
+let ( / ) (x : int option) (y : int option) : int option =
+  x >>= fun a ->
+  y >>= fun b ->
+  if b = 0 then None else return (Int.div a b)
+
+let upgrade_bianry op x y =
+  x >>= fun a ->
+  y >>= fun b ->
+  op a b
+
+let retrun_bianry op x y = return (op x y)
+
+let ( + ) = upgrade_bianry (retrun_bianry Int.add)
+let ( - ) = upgrade_bianry (retrun_bianry Int.sub)
+let ( * ) = upgrade_bianry (retrun_bianry Int.mul)
+let ( / ) = upgrade_bianry div
+
+
+module Maybe : Monad = struct
+  type 'a t = 'a option
+
+  let return x = Some x
+
+  let (>>=) m f =
+    match m with
+    | None -> None
+    | Some x -> f x
+end
+
+
+let ( + ) = Stdlib.( + )
+let ( - ) = Stdlib.( - )
+let ( * ) = Stdlib.( * )
+let ( / ) = Stdlib.( / )
+
+let inc x = x + 1
+let dec x = x - 1
+
+let inc_log x = (x + 1, Printf.sprintf "Called inc on %d" x)
+let dec_log x = (x + 1, Printf.sprintf "Called dec on %d" x)
+
+let log (name : string) (f : int -> int) : int -> int * string = 
+  fun x -> (f x, Printf.sprintf "Called %s on %d; " name x)
+
+let loggable (name : string) (f : int -> int) : int * string -> int * string =
+  fun (x, s1) ->
+    let (y, s2) = log name f x in
+    (y, s1 ^ s2)
+
+let inc' : int * string -> int * string =
+  loggable "inc" inc
+
+let dec' : int * string -> int * string =
+  loggable "dec" dec
+
+let ( >> ) f g x = x |> f |> g
+
+let id' : int * string -> int * string =
+  inc' >> dec'
+
+module Writer : Monad = struct
+  type 'a t = 'a * string
+
+  let return x = (x, "")
+
+  let ( >>= ) m f = 
+  let (x, s1) = m in 
+  let (y, s2) = f x in
+  (y, s1 ^ s2)
+end
